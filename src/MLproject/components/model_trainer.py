@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from catboost import CatBoostRegressor
 from sklearn.ensemble import (AdaBoostRegressor , GradientBoostingRegressor , RandomForestRegressor)
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score
+from sklearn.metrics import r2_score , mean_absolute_error , mean_squared_error
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.tree import DecisionTreeRegressor
 from xgboost import XGBRegressor
@@ -12,6 +12,10 @@ from src.MLproject.exception import CustonException
 from src.MLproject.logger import logging
 from src.MLproject.utils import evaluate_model , save_object
 from sklearn.model_selection import GridSearchCV
+import mlflow
+import numpy as np
+from urllib.parse import urlparse
+import mlflow.sklearn
 
 @dataclass
 class ModelTrainerConfig:
@@ -20,6 +24,12 @@ class ModelTrainerConfig:
 class ModelTrainer:
     def __init__(self):
         self.model_trainer_config = ModelTrainerConfig()
+
+    def eval_metrics(self , actual , pred):
+        rmse = np.sqrt(mean_squared_error(actual , pred))
+        mae = mean_absolute_error(actual , pred)
+        r2 = r2_score(actual , pred)
+        return rmse , mae, r2 
 
     
 
@@ -90,6 +100,41 @@ class ModelTrainer:
             best_model_name = list(model_report.keys())[list(model_report.values()).index(best_model_score)]
 
             best_model = models[best_model_name]
+
+            print("This is the best model : ")
+            print(best_model)
+
+            model_names = list(params.keys())
+
+            actual_model = ""
+
+            for i in model_names:
+                if best_model_name == i :
+                    actual_model = actual_model + i 
+
+            best_params = params[actual_model]
+
+            ## MLflow 
+
+            mlflow.set_registry_uri("https://dagshub.com/bhavyajethwa11/ML-Projects-.mlflow")
+            tracking_url_type_store = urlparse(mlflow.get_tracking_uri()).scheme
+
+            with mlflow.start_run():
+                predicted_qualities = best_model.predict(x_test)
+                (rmse , mae , r2) = self.eval_metrics(y_test , predicted_qualities)
+
+                mlflow.log_params(best_params)
+                mlflow.log_metric("rmse" , rmse)
+                mlflow.log_metric("r2" , r2)
+                mlflow.log_metric("mae" , mae)
+
+
+                if tracking_url_type_store != "file":
+
+                    mlflow.sklearn.log_model(best_model , "model" , registered_model_name = actual_model)
+                else:
+                    mlflow.sklearn.log_model(best_model , "model")
+
 
             if best_model_score < 0.6 :
                 raise CustonException("no best model found")
